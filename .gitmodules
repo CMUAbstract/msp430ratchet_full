@@ -1,0 +1,30 @@
+[submodule "ext/libedb"]
+	path = ext/libedb
+	url = git@github.com:CMUAbstract/libedb.git
+[submodule "ext/libio"]
+	path = ext/libio
+	url = git@github.com:CMUAbstract/libio.git
+[submodule "ext/libmsp"]
+	path = ext/libmsp
+	url = git@github.com:CMUAbstract/libmsp.git
+[submodule "ext/libmspbuiltins"]
+	path = ext/libmspbuiltins
+	url = git@github.com:CMUAbstract/libmspbuiltins.git
+[submodule "ext/libmspconsole"]
+	path = ext/libmspconsole
+	url = git@github.com:CMUAbstract/libmspconsole.git
+[submodule "ext/libmspmath"]
+	path = ext/libmspmath
+	url = git@github.com:CMUAbstract/libmspmath.git
+[submodule "ext/libmspprintf"]
+	path = ext/libmspprintf
+	url = git@github.com:CMUAbstract/libmspprintf.git
+[submodule "ext/libwispbase"]
+	path = ext/libwispbase
+	url = git@github.com:CMUAbstract/libwispbase.git
+[submodule "ext/maker"]
+	path = ext/maker
+	url = git@github.com:CMUAbstract/maker.git
+[submodule "ext/ratchet"]
+	path = ext/ratchet
+	url = git@github.com:CMUAbstract/msp430ratchet.git
