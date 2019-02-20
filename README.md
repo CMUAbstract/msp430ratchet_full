@@ -8,7 +8,7 @@ Additionally, it needs a backend to run, which is written in python (ext/python_
 1. init() and restore_regs() has to be called in the beginning of the main function manually. See the examples (src/). It is not hard to automate it with the compiler, which I simply did not.
 2. When declaring global vars, give it an \_\_nv prefix to make it go into the NVM (see src/). If the compiler puts anything in .bss, the system does not work. Alternatively, it can be fixed by a better linker script.
 3. Name the file as src/main_$(APP_NAME).c. Under msp430ratchet_full/, do
->> ./compile.sh ratchet wisp $(APP_NAME).
+> ./compile.sh ratchet wisp $(APP_NAME).
 
 ## Important Notes:
 1. It is only tested with LLVM v3.8. High possibility that it might not be compatible with other versions (especially because of the crude python backend).
