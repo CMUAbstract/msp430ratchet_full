@@ -21,13 +21,25 @@ include $(LIB_ROOT)/libmspbuiltins/bld/Makefile.target
 #include $(LIB_ROOT)/libmspprintf/bld/Makefile.target
 
 #ifeq ($(BOARD), mspts430)
-#CONFIG_PRINTF_LIB = libmspconsole
+CONFIG_PRINTF_LIB = libmspconsole
 #endif
 #ifeq ($(BOARD), wisp)
-CONFIG_PRINTF_LIB = libedb
-CONFIG_EDB = 1
+#CONFIG_PRINTF_LIB = libedb
+#CONFIG_EDB = 1
 #endif
 #include ../Makefile.config
+
+LOGIC = 1
+ifeq ($(LOGIC), 1)
+override CFLAGS += \
+	-DLOGIC=1
+endif
+
+ifeq ($(SYS), ratchet)
+override CFLAGS += \
+	-DRATCHET
+endif
+
 include $(LIB_ROOT)/maker/Makefile.console
 override CFLAGS += \
 	-DENERGY=$(ENERGY) \

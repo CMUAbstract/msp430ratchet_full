@@ -10,6 +10,7 @@ make bld/$1/all BOARD=$2 SRC=$3 VERBOSE=$4 ENERGY=$5 SYS=$1
 #python2 ./ext/python_dissembler/dissembler.py ./bld/alpaca/$2.out
 #python2 ./ext/python_dissembler/deal_with_return.py ./bld/alpaca/$2.S
 #python2 ./ext/python_dissembler/global_tracer.py ./bld/alpaca/$2_mod.out
-#mspdebug -v 3300 -d /dev/ttyACM0 tilib "prog bld/$1/$3.out"
+mspdebug -v 3300 tilib "prog bld/$1/$3.out"
+#/opt/ti/mspgcc/bin/msp430-elf-objdump -x bld/$1/$3.out | grep "2 .nv"
 echo "SYS=$1, BOARD=$2, SRC=$3"
 

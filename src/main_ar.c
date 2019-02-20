@@ -1,26 +1,17 @@
 #include <msp430.h>
+#include <libwispbase/wisp-base.h>
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-//#include <libwispbase/accel.h>
-typedef struct {
-    uint8_t x;
-    uint8_t y;
-    uint8_t z;
-#ifdef __clang__
-    uint8_t padding; // clang crashes with type size mismatch assert failure
-#endif
-} threeAxis_t_8;
+#include <libwispbase/accel.h>
 #include <libmspbuiltins/builtins.h>
 #ifdef LOGIC
 #define LOG(...)
 #define PRINTF(...)
-#define BLOCK_PRINTF(...)
-#define BLOCK_PRINTF_BEGIN(...)
-#define BLOCK_PRINTF_END(...)
+#define EIF_PRINTF(...)
 #define INIT_CONSOLE(...)
 #else
 #include <libio/log.h>
@@ -39,108 +30,83 @@ typedef struct {
 #define ENERGY_GUARD_END()
 #endif
 
-#ifdef ALPACA
-#include <libalpaca/alpaca.h>
-void no_chkpt_start(){};
-void no_chkpt_end(){};
-#endif
+#include "pins.h"
 #ifdef RATCHET
 #include <libratchet/ratchet.h>
-#define no_chkpt_start()
-#define no_chkpt_end()
 #endif
-
-#include "param.h"
-#include "pins.h"
 
 __nv unsigned count = 0;
 __nv unsigned seed = 1;
-__nv unsigned cnt;
-
-/* This is for progress reporting only */
 
 // Number of samples to discard before recording training set
 #define NUM_WARMUP_SAMPLES 3
 
 #define ACCEL_WINDOW_SIZE 3
-//#define ACCEL_WINDOW_SIZE 30
 #define MODEL_SIZE 16
 #define SAMPLE_NOISE_FLOOR 10 // TODO: made up value
 
 // Number of classifications to complete in one experiment
-#define SAMPLES_TO_COLLECT 8
+#define SAMPLES_TO_COLLECT 128
 
-#ifdef ACCEL_16BIT_TYPE
-typedef threeAxis_t accelReading;
-#else // !ACCEL_16BIT_TYPE
 typedef threeAxis_t_8 accelReading;
-#endif // !ACCEL_16BIT_TYPE
 static void init_hw()
 {
 	msp_watchdog_disable();
 	msp_gpio_unlock();
 	msp_clock_setup();
 }
-__nv unsigned nv_cnt;
-#if ENERGY == 0
-__attribute__((interrupt(51)))
-	void TimerB1_ISR(void){
-		PMMCTL0 = PMMPW | PMMSWPOR;
-		BITSET(TBCTL, TBCLR);
-	}
-__attribute__((section("__interrupt_vector_timer0_b1"),aligned(2)))
-void(*__vector_timer0_b1)(void) = TimerB1_ISR;
-#endif
 
 typedef accelReading accelWindow[ACCEL_WINDOW_SIZE];
 
 typedef struct {
-    unsigned meanmag;
-    unsigned stddevmag;
+	unsigned meanmag;
+	unsigned stddevmag;
 } features_t;
 
 typedef enum {
-    CLASS_STATIONARY,
-    CLASS_MOVING,
+	CLASS_STATIONARY,
+	CLASS_MOVING,
 } class_t;
 
 typedef struct {
-    features_t stationary[MODEL_SIZE];
-    features_t moving[MODEL_SIZE];
+	features_t stationary[MODEL_SIZE];
+	features_t moving[MODEL_SIZE];
 } model_t;
 
 typedef enum {
-    MODE_IDLE = 3,
-    MODE_TRAIN_STATIONARY = 2,
-    MODE_TRAIN_MOVING = 1,
-    MODE_RECOGNIZE = 0, // default
-    //MODE_IDLE = (BIT(PIN_AUX_1) | BIT(PIN_AUX_2)),
-    //MODE_TRAIN_STATIONARY = BIT(PIN_AUX_1),
-   // MODE_TRAIN_MOVING = BIT(PIN_AUX_2),
-   // MODE_RECOGNIZE = 0, // default
+	MODE_IDLE = 3,
+	MODE_TRAIN_STATIONARY = 2,
+	MODE_TRAIN_MOVING = 1,
+	MODE_RECOGNIZE = 0, // default
+	//MODE_IDLE = (BIT(PIN_AUX_1) | BIT(PIN_AUX_2)),
+	//MODE_TRAIN_STATIONARY = BIT(PIN_AUX_1),
+	// MODE_TRAIN_MOVING = BIT(PIN_AUX_2),
+	// MODE_RECOGNIZE = 0, // default
 } run_mode_t;
 
 typedef struct {
-    unsigned totalCount;
-    unsigned movingCount;
-    unsigned stationaryCount;
+	unsigned totalCount;
+	unsigned movingCount;
+	unsigned stationaryCount;
 } stats_t;
 
 
 void accel_sample(unsigned seed, accelReading* result){
+	//void ngleSample_(unsigned seed, accelReading* result){
+	//void ACCEL_singleSample_(unsigned seed, threeAxis_t_8* result){
 	result->x = (seed*17)%85;
 	result->y = (seed*17*17)%85;
 	result->z = (seed*17*17*17)%85;
+	//	seed++;
+	//	return 1;
 }
-//__attribute__((always_inline))
 void acquire_window(accelWindow window)
 {
 	accelReading sample;
 	unsigned samplesInWindow = 0;
 
-	while ( samplesInWindow < ACCEL_WINDOW_SIZE) {
+	while (samplesInWindow < ACCEL_WINDOW_SIZE) {
 		accel_sample(seed, &sample);
-		LOG("seed: %u\r\n", seed);
 		seed++;
 		LOG("acquire: sample %u %u %u\r\n", sample.x, sample.y, sample.z);
 
@@ -148,15 +114,11 @@ void acquire_window(accelWindow window)
 	}
 }
 
-//__attribute__((always_inline))
 void transform(accelWindow window)
 {
 	unsigned i = 0;
 
 	LOG("transform\r\n");
-//	LOG("sample %u %u %u\r\n", window[0].x, window[0].y, window[0].z);
-//	LOG("sample %u %u %u\r\n", window[1].x, window[1].y, window[1].z);
-//	LOG("sample %u %u %u\r\n", window[2].x, window[2].y, window[2].z);
 
 	for (i = 0; i < ACCEL_WINDOW_SIZE; i++) {
 		accelReading *sample = &window[i];
@@ -175,10 +137,8 @@ void transform(accelWindow window)
 	}
 }
 
-//__attribute__((always_inline))
 void featurize(features_t *features, accelWindow aWin)
 {
-	LOG("feat %x\r\n", features);
 	accelReading mean;
 	accelReading stddev;
 
@@ -194,7 +154,7 @@ void featurize(features_t *features, accelWindow aWin)
 		 mean.x = mean.x / ACCEL_WINDOW_SIZE;
 		 mean.y = mean.y / ACCEL_WINDOW_SIZE;
 		 mean.z = mean.z / ACCEL_WINDOW_SIZE;
-		 */
+	 */
 	mean.x >>= 2;
 	mean.y >>= 2;
 	mean.z >>= 2;
@@ -211,7 +171,7 @@ void featurize(features_t *features, accelWindow aWin)
 		 stddev.x = stddev.x / (ACCEL_WINDOW_SIZE - 1);
 		 stddev.y = stddev.y / (ACCEL_WINDOW_SIZE - 1);
 		 stddev.z = stddev.z / (ACCEL_WINDOW_SIZE - 1);
-		 */
+	 */
 	stddev.x >>= 2;
 	stddev.y >>= 2;
 	stddev.z >>= 2;
@@ -225,21 +185,15 @@ void featurize(features_t *features, accelWindow aWin)
 	LOG("featurize: mean %u sd %u\r\n", features->meanmag, features->stddevmag);
 }
 
-//__attribute__((always_inline))
 class_t classify(features_t *features, model_t *model)
 {
-	LOG("cf %x\r\n", features);
 	int move_less_error = 0;
 	int stat_less_error = 0;
 	features_t *model_features;
 	int i;
-		LOG("check3: mn %u sd %u %u\r\n",
-					 model->moving[15].meanmag, model->moving[15].stddevmag);
 
-	LOG("mean %u stddev %u\r\n", features->meanmag, features->stddevmag);
 	for (i = 0; i < MODEL_SIZE; ++i) {
 		model_features = &model->stationary[i];
-		LOG("stat mean %u stddev %u\r\n", model_features->meanmag, model_features->stddevmag);
 
 		long int stat_mean_err = (model_features->meanmag > features->meanmag)
 			? (model_features->meanmag - features->meanmag)
@@ -250,7 +204,6 @@ class_t classify(features_t *features, model_t *model)
 			: (features->stddevmag - model_features->stddevmag);
 
 		model_features = &model->moving[i];
-		LOG("moving mean %u stddev %u %u\r\n", model_features->meanmag, model_features->stddevmag, i);
 
 		long int move_mean_err = (model_features->meanmag > features->meanmag)
 			? (model_features->meanmag - features->meanmag)
@@ -260,21 +213,18 @@ class_t classify(features_t *features, model_t *model)
 			? (model_features->stddevmag - features->stddevmag)
 			: (features->stddevmag - model_features->stddevmag);
 
-		LOG("mme %x %x sme %x %x\r\n", (unsigned)(move_mean_err >> 16), (unsigned)(move_mean_err), (unsigned)(stat_mean_err >> 16), (unsigned)(stat_mean_err));
 		if (move_mean_err < stat_mean_err) {
 			move_less_error++;
 		} else {
 			stat_less_error++;
 		}
 
-		LOG("mse %x %x sse %x %x\r\n", (unsigned)(move_sd_err >> 16), (unsigned)(move_sd_err), (unsigned)(stat_sd_err >> 16), (unsigned)(stat_sd_err));
 		if (move_sd_err < stat_sd_err) {
 			move_less_error++;
 		} else {
 			stat_less_error++;
 		}
 	}
-	LOG("me %u se %u\r\n", move_less_error, stat_less_error);
 
 	class_t class = move_less_error > stat_less_error ?
 		CLASS_MOVING : CLASS_STATIONARY;
@@ -283,7 +233,6 @@ class_t classify(features_t *features, model_t *model)
 	return class;
 }
 
-//__attribute__((always_inline))
 void record_stats(stats_t *stats, class_t class)
 {
 	/* stats->totalCount, stats->movingCount, and stats->stationaryCount have an
@@ -294,18 +243,10 @@ void record_stats(stats_t *stats, class_t class)
 	switch (class) {
 		case CLASS_MOVING:
 
-#if defined(SHOW_RESULT_ON_LEDS)
-			blink(CLASSIFY_BLINKS, CLASSIFY_BLINK_DURATION, LED1);
-#endif //SHOW_RESULT_ON_LEDS
-
 			stats->movingCount++;
 			break;
 
 		case CLASS_STATIONARY:
-
-#if defined(SHOW_RESULT_ON_LEDS)
-			blink(CLASSIFY_BLINKS, CLASSIFY_BLINK_DURATION, LED2);
-#endif //SHOW_RESULT_ON_LEDS
 
 			stats->stationaryCount++;
 			break;
@@ -315,7 +256,6 @@ void record_stats(stats_t *stats, class_t class)
 			stats->stationaryCount, stats->movingCount, stats->totalCount);
 }
 
-//__attribute__((always_inline))
 void print_stats(stats_t *stats)
 {
 	unsigned resultStationaryPct = stats->stationaryCount * 100 / stats->totalCount;
@@ -323,19 +263,13 @@ void print_stats(stats_t *stats)
 
 	unsigned sum = stats->stationaryCount + stats->movingCount;
 
-
-#if ENERGY == 0
-	no_chkpt_start();
-	//PRINTF("stats: s %u (%u%%) m %u (%u%%) sum/tot %u/%u: %c\r\n",
-	//		stats->stationaryCount, resultStationaryPct,
-	//		stats->movingCount, resultMovingPct,
-	//		stats->totalCount, sum,
-	//		sum == stats->totalCount && sum == SAMPLES_TO_COLLECT ? 'V' : 'X');
-	no_chkpt_end();
-#endif
+	PRINTF("stats: s %u (%u%%) m %u (%u%%) sum/tot %u/%u: %c\r\n",
+			stats->stationaryCount, resultStationaryPct,
+			stats->movingCount, resultMovingPct,
+			stats->totalCount, sum,
+			sum == stats->totalCount && sum == SAMPLES_TO_COLLECT ? 'V' : 'X');
 }
 
-//__attribute__((always_inline))
 void warmup_sensor()
 {
 	unsigned discardedSamplesCount = 0;
@@ -343,14 +277,12 @@ void warmup_sensor()
 
 	LOG("warmup\r\n");
 
-	while ( discardedSamplesCount++ < NUM_WARMUP_SAMPLES) {
+	while (discardedSamplesCount++ < NUM_WARMUP_SAMPLES) {
 		accel_sample(seed, &sample);
-		LOG("seed: %u\r\n", seed);
 		seed++;
 	}
 }
 
-//__attribute__((always_inline))
 void train(features_t *classModel)
 {
 	accelWindow sampleWindow;
@@ -365,22 +297,15 @@ void train(features_t *classModel)
 		featurize(&features, sampleWindow);
 
 		classModel[i] = features;
-		LOG("train: done2: mn %u sd %u %u\r\n",
-					 classModel[i].meanmag, classModel[i].stddevmag, i);
 	}
 
-	LOG("train: done: mn %u sd %u\r\n",
-	       features.meanmag, features.stddevmag);
+	//   PRINTF("train: done: mn %u sd %u\r\n",
+	//          features.meanmag, features.stddevmag);
 }
 
-//__attribute__((always_inline))
 void recognize(model_t *model)
 {
-#ifdef MEMENTOS_NONVOLATILE
 	stats_t stats;
-#else
-	stats_t stats;
-#endif
 	accelWindow sampleWindow;
 	features_t features;
 	class_t class;
@@ -391,13 +316,9 @@ void recognize(model_t *model)
 	stats.movingCount = 0;
 
 	for (i = 0; i < SAMPLES_TO_COLLECT; ++i) {
-		LOG("check2: mn %u sd %u %u\r\n",
-					 model->moving[15].meanmag, model->moving[15].stddevmag);
 		acquire_window(sampleWindow);
 		transform(sampleWindow);
-		LOG("bf mean %u stddev %u\r\n", features.meanmag, features.stddevmag);
 		featurize(&features, sampleWindow);
-		LOG("af mean %u stddev %u\r\n", features.meanmag, features.stddevmag);
 		class = classify(&features, model);
 		record_stats(&stats, class);
 	}
@@ -405,7 +326,6 @@ void recognize(model_t *model)
 	print_stats(&stats);
 }
 
-//__attribute__((always_inline))
 run_mode_t select_mode(uint8_t *prev_pin_state)
 {
 	uint8_t pin_state = 1;
@@ -414,35 +334,14 @@ run_mode_t select_mode(uint8_t *prev_pin_state)
 	LOG("count: %u\r\n", count);
 	if(count >= 2) pin_state = 2;
 	if(count >= 3) pin_state = 0;
-	if(count >= 4) {
-#ifndef CONFIG_EDB
-		PRINTF("cnt:%u\r\n", nv_cnt);
-//		PRINTF("TIME end is 65536*%u+%u\r\n",overflow,(unsigned)TBR);
-#endif
-#if ENERGY == 0
+	if(count >= 4) {   
 		PRINTF("end\r\n");
-#endif
-		cnt++;
-		if (cnt == 1) {
-		//if (cnt == 20) {
-#ifdef LOGIC
-				// Out high
-//				GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-				// Out low
-//				GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-				// tmp
-#ifndef RATCHET
-				unsigned tmp = curctx->cur_reg[15];
-#endif
-#endif
-				end_run();
-				cnt = 0;
-		}
+		GPIO(PORT_AUX3, OUT) |= BIT(PIN_AUX_3);
+		GPIO(PORT_AUX3, OUT) &= ~BIT(PIN_AUX_3);
 		count = 0;
 		seed = 1;
 		*prev_pin_state = MODE_IDLE;
 		pin_state = 99;
-		//		exit(0);
 	}
 	// Don't re-launch training after finishing training
 	if ((pin_state == MODE_TRAIN_STATIONARY ||
@@ -458,107 +357,67 @@ run_mode_t select_mode(uint8_t *prev_pin_state)
 	return (run_mode_t)pin_state;
 }
 
-//__attribute__((always_inline))
-//static void init_accel()
-//{
-//#ifdef ACCEL_16BIT_TYPE
-//	threeAxis_t accelID = {0};
-//#else
-//	threeAxis_t_8 accelID = {0};
-//#endif
-//}
+static void init_accel()
+{
+#ifdef ACCEL_16BIT_TYPE
+	threeAxis_t accelID = {0};
+#else
+	threeAxis_t_8 accelID = {0};
+#endif
+}
 
 void init()
 {
-#ifndef CONFIG_EDB
-	BITSET(TBCTL, (TBSSEL_1 | ID_3 | MC_2 | TBCLR));
-	BITSET(TBCCTL1 , CCIE);
-	TBCCR1 = 40;
-//	TBCTL &= 0xE6FF; //set 12,11 bit to zero (16bit) also 8 to zero (SMCLK)
-//	TBCTL |= 0x0200; //set 9 to one (SMCLK)
-//	TBCTL |= 0x00C0; //set 7-6 bit to 11 (divider = 8);
-//	TBCTL &= 0xFFEF; //set bit 4 to zero
-//	TBCTL |= 0x0020; //set bit 5 to one (5-4=10: continuous mode)
-//	TBCTL |= 0x0002; //interrupt enable
-#endif
 	init_hw();
-#ifdef CONFIG_EDB
-//	edb_init();
-#endif
 
 	INIT_CONSOLE();
 
 	__enable_interrupt();
-	//init_accel();
-
-	//PRINTF("a%u.\r\n", curctx->cur_reg[15]);
 #ifdef LOGIC
 	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-
 	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_1);
 	GPIO(PORT_AUX3, OUT) &= ~BIT(PIN_AUX_3);
-	// Output enabled
-	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_1);
+
 	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_2);
+	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_1);
 	GPIO(PORT_AUX3, DIR) |= BIT(PIN_AUX_3);
-	//
-	// Out high
-	GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-	// Out low
-	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-	// Out high
-	//				GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-	// Out low
-	// tmp
+#ifdef OVERHEAD
+	// When timing overhead, pin 2 is on for
+	// region of interest
 #else
-#ifdef RATCHET
+	// elsewise, pin2 is toggled on boot
+	GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
+	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
+#endif
+#else
 	if (cur_reg == regs_0) {
 		PRINTF("%x\r\n", regs_1[0]);
 	}
 	else {
 		PRINTF("%x\r\n", regs_0[0]);
 	}
-#else
-	if (curctx->cur_reg == regs_0) {
-		PRINTF("%x\r\n", regs_1[0]);
-	}
-	else {
-		PRINTF("%x\r\n", regs_0[0]);
-	}
 #endif
-#endif
+
 }
 
 int main()
 {
-#ifdef RATCHET
+	// init() and restore_regs() should be called at the beginning of main.
+	// I could have made the compiler to do that, but was a bit lazy..
 	init();
 	restore_regs();
-#endif
-	// "Globals" must be on the stack because Mementos doesn't handle real
-	// globals correctly
+
 	uint8_t prev_pin_state = MODE_IDLE;
 
 	model_t model;
-	cnt = 0;
-	while (1) {
-#if ENERGY == 0
+
+	while (1)
+	{
 		if (count == 0) {
-			nv_cnt = 0;
-			if (cnt == 0) {
-#ifdef LOGIC
-				// Out high
-				GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_1);
-				// Out low
-				GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_1);
-#endif
-			}
+			GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_1);
+			GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_1);
 			PRINTF("start\r\n");
-#ifndef CONFIG_EDB
-			//		PRINTF("TIME start is 65536*%u+%u\r\n",overflow,(unsigned)TBR);
-#endif
 		}
-#endif
 		run_mode_t mode = select_mode(&prev_pin_state);
 		switch (mode) {
 			case MODE_TRAIN_STATIONARY:
@@ -568,13 +427,9 @@ int main()
 			case MODE_TRAIN_MOVING:
 				LOG("mode: moving\r\n");
 				train(model.moving);
-				LOG("check0: mn %u sd %u\r\n",
-						model.moving[15].meanmag, model.moving[15].stddevmag);
 				break;
 			case MODE_RECOGNIZE:
 				LOG("mode: recognize\r\n");
-				LOG("check1: mn %u sd %u %u\r\n",
-						model.moving[15].meanmag, model.moving[15].stddevmag);
 				recognize(&model);
 				break;
 			default:

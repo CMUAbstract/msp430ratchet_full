@@ -1,4 +1,5 @@
 #include <msp430.h>
+#include <libwispbase/wisp-base.h>
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -30,33 +31,16 @@
 #define ENERGY_GUARD_END()
 #endif
 
-__nv unsigned nv_cnt;
-#ifdef ALPACA
-#include <libalpaca/alpaca.h>
-void no_chkpt_start(){};
-void no_chkpt_end(){};
-#endif
 #ifdef RATCHET
 #include <libratchet/ratchet.h>
-#define no_chkpt_start()
-#define no_chkpt_end()
 #endif
-
 
 #undef N // conflicts with us
 
-#include "param.h"
 #include "pins.h"
 
-// #define SHOW_PROGRESS_ON_LED
-// #define BLOCK_DELAY
-
-
-/* This is for progress reporting only */
-
-
-//#define KEY_SIZE_BITS	256
-#define KEY_SIZE_BITS	64
+#define KEY_SIZE_BITS	256
+//#define KEY_SIZE_BITS	64
 #define DIGIT_BITS       8 // arithmetic ops take 8-bit args produce 16-bit result
 #define DIGIT_MASK       0x00ff
 #define NUM_DIGITS       (KEY_SIZE_BITS / DIGIT_BITS)
@@ -74,8 +58,8 @@ typedef uint16_t digit_t;
 typedef unsigned bigint_t[NUM_DIGITS * 2];
 
 typedef struct {
-    bigint_t n; // modulus
-    digit_t e;  // exponent
+	bigint_t n; // modulus
+	digit_t e;  // exponent
 } pubkey_t;
 
 // Blocks are padded with these digits (on the MSD side). Padding value must be
@@ -89,8 +73,8 @@ static __ro_nv const uint8_t PAD_DIGITS[] = { 0x01 };
 
 // modulus: byte order: LSB to MSB, constraint MSB>=0x80
 static __ro_nv const pubkey_t pubkey = {
-//#include "../data/key256.txt"
-#include "../data/key64.txt"
+#include "../data/key256.txt"
+	//#include "../data/key64.txt"
 };
 
 static __ro_nv const unsigned char PLAINTEXT[] =
@@ -103,107 +87,81 @@ static __ro_nv const unsigned char PLAINTEXT[] =
 __nv uint8_t CYPHERTEXT[CYPHERTEXT_SIZE] = {0};
 __nv unsigned CYPHERTEXT_LEN = 0;
 
-// Store in NV memory to reduce RAM footprint (might not even fit in RAM)
-// Except with Mementos, which cannot handle NV state. With mementos
-// these are allocated on the stack. Allocting them on the stack as
-// opposed to letting them be (volatile) globals is a workaround
-// for Mementos including the read-only globals into the checkpoint,
-// if it is told to include any globals at all.
-//bigint_t in_block;
-//bigint_t out_block;
-//bigint_t qxn;
-
-//__attribute__((always_inline))
 void print_bigint(const bigint_t n, unsigned digits)
 {
-    int i;
-    for (i = digits - 1; i >= 0; --i) {
-#if ENERGY == 0
-        PRINTF("%02x ", n[i]);
-#endif
-		}
+	int i;
+	for (i = digits - 1; i >= 0; --i) {
+		PRINTF("%02x ", n[i]);
+	}
 }
 
-//__attribute__((always_inline))
 void log_bigint(const bigint_t n, unsigned digits)
 {
-		no_chkpt_start();
-    BLOCK_PRINTF_BEGIN();
-    int i;
-    for (i = digits - 1; i >= 0; --i) {
-#if ENERGY == 0
-        BLOCK_PRINTF("%02x ", n[i]);
-#endif
-		}
-		BLOCK_PRINTF("\r\n");
-    BLOCK_PRINTF_END();
-		no_chkpt_end();
+	BLOCK_PRINTF_BEGIN();
+	int i;
+	for (i = digits - 1; i >= 0; --i) {
+		BLOCK_PRINTF("%02x ", n[i]);
+	}
+	BLOCK_PRINTF("\r\n");
+	BLOCK_PRINTF_END();
 }
 
-//__attribute__((always_inline))
 void print_hex_ascii(const uint8_t *m, unsigned len)
 {
-		//PMMCTL0 = PMMPW | PMMSWPOR;
-    int i, j;
-#if ENERGY == 0
-		no_chkpt_start();
-		BLOCK_PRINTF_BEGIN();
-    for (i = 0; i < len; i += PRINT_HEX_ASCII_COLS) {
-        for (j = 0; j < PRINT_HEX_ASCII_COLS && i + j < len; ++j) {
-            BLOCK_PRINTF("%02x ", m[i + j]);
-				}
-        for (; j < PRINT_HEX_ASCII_COLS; ++j)
-            BLOCK_PRINTF("   ");
-        BLOCK_PRINTF(" ");
-        for (j = 0; j < PRINT_HEX_ASCII_COLS && i + j < len; ++j) {
-            char c = m[i + j];
-            if (!(32 <= c && c <= 127)) // not printable
-                c = '.';
-            BLOCK_PRINTF("%c", c);
-        }
-        BLOCK_PRINTF("\r\n");
-    }
-		BLOCK_PRINTF_END();
-		no_chkpt_end();
-#endif
+	int i, j;
+	BLOCK_PRINTF_BEGIN();
+	for (i = 0; i < len; i += PRINT_HEX_ASCII_COLS) {
+		for (j = 0; j < PRINT_HEX_ASCII_COLS && i + j < len; ++j) {
+			BLOCK_PRINTF("%02x ", m[i + j]);
+		}
+		for (; j < PRINT_HEX_ASCII_COLS; ++j)
+			BLOCK_PRINTF("   ");
+		BLOCK_PRINTF(" ");
+		for (j = 0; j < PRINT_HEX_ASCII_COLS && i + j < len; ++j) {
+			char c = m[i + j];
+			if (!(32 <= c && c <= 127)) // not printable
+				c = '.';
+			BLOCK_PRINTF("%c", c);
+		}
+		BLOCK_PRINTF("\r\n");
+	}
+	BLOCK_PRINTF_END();
 }
 
-//__attribute__((always_inline))
 void mult(bigint_t a, bigint_t b, bigint_t product)
 {
-    int i;
-    unsigned digit;
-    digit_t p, c, dp;
-    digit_t carry = 0;
+	int i;
+	unsigned digit;
+	digit_t p, c, dp;
+	digit_t carry = 0;
 
-//    PRINTF("mult: a = "); log_bigint(a, NUM_DIGITS); BLOCK_LOG("\r\n");
-//    PRINTF("mult: b = "); log_bigint(b, NUM_DIGITS); BLOCK_LOG("\r\n");
+	//    PRINTF("mult: a = "); log_bigint(a, NUM_DIGITS); BLOCK_LOG("\r\n");
+	//    PRINTF("mult: b = "); log_bigint(b, NUM_DIGITS); BLOCK_LOG("\r\n");
 
-    for (digit = 0; digit < NUM_DIGITS * 2; ++digit) {
-        LOG("mult: d=%u\r\n", digit);
+	for (digit = 0; digit < NUM_DIGITS * 2; ++digit) {
+		LOG("mult: d=%u\r\n", digit);
 
-        p = carry;
-        c = 0;
-        for (i = 0; i < NUM_DIGITS; ++i) {
-            if (i <= digit && digit - i < NUM_DIGITS) {
-                dp = a[digit - i] * b[i];
+		p = carry;
+		c = 0;
+		for (i = 0; i < NUM_DIGITS; ++i) {
+			if (i <= digit && digit - i < NUM_DIGITS) {
+				dp = a[digit - i] * b[i];
 
-                c += dp >> DIGIT_BITS;
-                p += dp & DIGIT_MASK;
+				c += dp >> DIGIT_BITS;
+				p += dp & DIGIT_MASK;
 
-                LOG("mult: i=%u a=%x b=%x dp=%x p=%x\r\n", i, a[digit - i], b[i], dp, p);
-            }
-        }
+				LOG("mult: i=%u a=%x b=%x dp=%x p=%x\r\n", i, a[digit - i], b[i], dp, p);
+			}
+		}
 
-        c += p >> DIGIT_BITS;
-        p &= DIGIT_MASK;
+		c += p >> DIGIT_BITS;
+		p &= DIGIT_MASK;
 
-        product[digit] = p;
-        carry = c;
-    }
+		product[digit] = p;
+		carry = c;
+	}
 }
 
-//__attribute__((always_inline))
 bool reduce_normalizable(bigint_t m, const bigint_t n, unsigned d)
 {
 	int i;
@@ -230,7 +188,6 @@ bool reduce_normalizable(bigint_t m, const bigint_t n, unsigned d)
 	return normalizable;
 }
 
-//__attribute__((always_inline))
 void reduce_normalize(bigint_t m, const bigint_t n, unsigned digit)
 {
 	int i;
@@ -260,7 +217,6 @@ void reduce_normalize(bigint_t m, const bigint_t n, unsigned digit)
 	}
 }
 
-//__attribute__((always_inline))
 void reduce_quotient(digit_t *quotient, bigint_t m, const bigint_t n, unsigned d)
 {
 	digit_t q, n_div;
@@ -324,7 +280,6 @@ void reduce_quotient(digit_t *quotient, bigint_t m, const bigint_t n, unsigned d
 	*quotient = q;
 }
 
-//__attribute__((always_inline))
 void reduce_multiply(bigint_t product, digit_t q, const bigint_t n, unsigned d)
 {
 	int i;
@@ -365,17 +320,8 @@ void reduce_multiply(bigint_t product, digit_t q, const bigint_t n, unsigned d)
 
 		product[i] = p;
 	}
-
-//	PRINTF("reduce: multiply: product = ");
-//	log_bigint(product, 2 * NUM_DIGITS);
-//	BLOCK_LOG_BEGIN();
-//	BLOCK_LOG("reduce: multiply: product = ");
-//	log_bigint(product, 2 * NUM_DIGITS);
-//	BLOCK_LOG("\r\n");
-//	BLOCK_LOG_END();
 }
 
-//__attribute__((always_inline))
 int reduce_compare(bigint_t a, bigint_t b)
 {
 	LOG("reduce: compare\r\n");
@@ -396,7 +342,6 @@ int reduce_compare(bigint_t a, bigint_t b)
 	return relation;
 }
 
-//__attribute__((always_inline))
 void reduce_add(bigint_t a, const bigint_t b, unsigned d)
 {
 	int i, j;
@@ -431,17 +376,8 @@ void reduce_add(bigint_t a, const bigint_t b, unsigned d)
 
 		a[i] = r;
 	}
-
-//	PRINTF("reduce: add: sum = ");
-//	log_bigint(a, 2 * NUM_DIGITS);
-//	BLOCK_LOG_BEGIN();
-//	BLOCK_LOG("reduce: add: sum = ");
-//	log_bigint(a, 2 * NUM_DIGITS);
-//	BLOCK_LOG("\r\n");
-//	BLOCK_LOG_END();
 }
 
-//__attribute__((always_inline))
 void reduce_subtract(bigint_t a, bigint_t b, unsigned d)
 {
 	int i;
@@ -474,17 +410,8 @@ void reduce_subtract(bigint_t a, bigint_t b, unsigned d)
 
 		a[i] = r;
 	}
-
-//	PRINTF("reduce: subtract: sum = ");
-//	log_bigint(a, 2 * NUM_DIGITS);
-//	BLOCK_LOG_BEGIN();
-//	BLOCK_LOG("reduce: subtract: sum = ");
-//	log_bigint(a, 2 * NUM_DIGITS);
-//	BLOCK_LOG("\r\n");
-//	BLOCK_LOG_END();
 }
 
-//__attribute__((always_inline))
 void reduce(bigint_t m, const bigint_t n)
 {
 	digit_t q;
@@ -515,14 +442,6 @@ void reduce(bigint_t m, const bigint_t n)
 		reduce_subtract(m, qxn, d);
 		d--;
 	}
-
-//	PRINTF("reduce: num = ");
-//	log_bigint(m, NUM_DIGITS);
-//	BLOCK_LOG_BEGIN();
-//	BLOCK_LOG("reduce: num = ");
-//	log_bigint(m, NUM_DIGITS);
-//	BLOCK_LOG("\r\n");
-//	BLOCK_LOG_END();
 }
 
 void mod_mult(bigint_t a, bigint_t b, const bigint_t n, bigint_t product)
@@ -590,19 +509,7 @@ void encrypt(uint8_t *cyphertext, unsigned *cyphertext_len,
 		for (i = 0; i < NUM_PAD_DIGITS; ++i)
 			in_block[NUM_DIGITS - NUM_PAD_DIGITS + i] = PAD_DIGITS[i];
 
-		//        BLOCK_LOG_BEGIN();
-		//        BLOCK_LOG("in block: ");
-		//        log_bigint(in_block, NUM_DIGITS);
-		//        BLOCK_LOG("\r\n");
-		//        BLOCK_LOG_END();
-
 		mod_exp(out_block, in_block, k->e, k->n);
-
-		//BLOCK_LOG_BEGIN();
-		//BLOCK_LOG("out block: ");
-		//log_bigint(out_block, NUM_DIGITS);
-		//BLOCK_LOG("\r\n");
-		//BLOCK_LOG_END();
 
 		for (i = 0; i < NUM_DIGITS; ++i)
 			cyphertext[out_block_offset + i] = out_block[i];
@@ -622,72 +529,45 @@ static void init_hw()
 	msp_clock_setup();
 }
 
-__attribute__((interrupt(51)))
-	void TimerB1_ISR(void){
-		PMMCTL0 = PMMPW | PMMSWPOR;
-		BITSET(TBCTL, TBCLR);
-	}
-__attribute__((section("__interrupt_vector_timer0_b1"),aligned(2)))
-void(*__vector_timer0_b1)(void) = TimerB1_ISR;
 void init()
 {
-#ifndef CONFIG_EDB
-	BITSET(TBCTL, (TBSSEL_1 | ID_3 | MC_2 | TBCLR));
-	BITSET(TBCCTL1 , CCIE);
-	TBCCR1 = 40;
-//	TBCTL &= 0xE6FF; //set 12,11 bit to zero (16bit) also 8 to zero (SMCLK)
-//	TBCTL |= 0x0200; //set 9 to one (SMCLK)
-//	TBCTL |= 0x00C0; //set 7-6 bit to 11 (divider = 8);
-//	TBCTL &= 0xFFEF; //set bit 4 to zero
-//	TBCTL |= 0x0020; //set bit 5 to one (5-4=10: continuous mode)
-//	TBCTL |= 0x0002; //interrupt enable
-#endif
 	init_hw();
-#ifdef CONFIG_EDB
-	edb_init();
-#endif
 
 	INIT_CONSOLE();
 
 	__enable_interrupt();
 #ifdef LOGIC
 	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-
 	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_1);
 	GPIO(PORT_AUX3, OUT) &= ~BIT(PIN_AUX_3);
-	// Output enabled
-	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_1);
+
 	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_2);
+	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_1);
 	GPIO(PORT_AUX3, DIR) |= BIT(PIN_AUX_3);
-	//
-	// Out high
-	GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-	// Out low
-	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-	// Out high
-	//				GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-	// Out low
-	// tmp
+#ifdef OVERHEAD
+	// When timing overhead, pin 2 is on for
+	// region of interest
 #else
-#ifdef RATCHET
+	// elsewise, pin2 is toggled on boot
+	GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
+	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
+#endif
+#else
 	if (cur_reg == regs_0) {
 		PRINTF("%x\r\n", regs_1[0]);
 	}
 	else {
 		PRINTF("%x\r\n", regs_0[0]);
 	}
-#else
-	PRINTF("a%u.\r\n", curctx->cur_reg[15]);
-#endif
 #endif
 }
 
 int main()
 {
-#ifdef RATCHET
+	// init() and restore_regs() should be called at the beginning of main.
+	// I could have made the compiler to do that, but was a bit lazy..
 	init();
 	restore_regs();
-#endif
 	unsigned message_length;
 
 	message_length = sizeof(PLAINTEXT) - 1; // exclude null byte
@@ -695,46 +575,17 @@ int main()
 	// 	unsigned CYPHERTEXT_LEN = 0;
 
 	while (1) {
-		nv_cnt = 0;
 #ifdef LOGIC
-		// Out high
 		GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_1);
-		// Out low
 		GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_1);
 #endif
-#if ENERGY == 0
 		PRINTF("start\r\n");
-#ifndef CONFIG_EDB
-		//		PRINTF("TIME start is 65536*%u+%u\r\n",overflow,(unsigned)TBR);
-#endif
-#endif
-		for (unsigned cnt = 0; cnt < 1; ++cnt) {
-		//for (unsigned cnt = 0; cnt < 20; ++cnt) {
-			encrypt(CYPHERTEXT, &CYPHERTEXT_LEN, PLAINTEXT, message_length, &pubkey);
-
-#if ENERGY == 0
-#ifndef CONFIG_EDB
-			//		PRINTF("TIME end is 65536*%u+%u\r\n",overflow,(unsigned)TBR);
-#endif
-			PRINTF("end\r\n");
-			//print_hex_ascii(CYPHERTEXT, CYPHERTEXT_LEN);
-#endif
-		}
+		encrypt(CYPHERTEXT, &CYPHERTEXT_LEN, PLAINTEXT, message_length, &pubkey);
 #ifdef LOGIC
-		// Out high
-		//				GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-		// Out low
-		//				GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-		// tmp
-#ifndef RATCHET
-		unsigned tmp = curctx->cur_reg[15];
+		GPIO(PORT_AUX3, OUT) |= BIT(PIN_AUX_3);
+		GPIO(PORT_AUX3, OUT) &= ~BIT(PIN_AUX_3);
 #endif
-#endif
-		end_run();
-		PRINTF("nv_cnt: %u\r\n", nv_cnt);
-		//PRINTF("chkpt cnt: %u\r\n", chkpt_count);
-		//print_hex_ascii(CYPHERTEXT, CYPHERTEXT_LEN);
-		}
-
-		return 0;
 	}
+
+	return 0;
+}

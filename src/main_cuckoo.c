@@ -1,4 +1,5 @@
 #include <msp430.h>
+#include <libwispbase/wisp-base.h>
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -33,32 +34,16 @@
 #define ENERGY_GUARD_END()
 #endif
 
-#ifdef ALPACA
-#include <libalpaca/alpaca.h>
-#endif
 #ifdef RATCHET
 #include <libratchet/ratchet.h>
 #endif
 
-__nv unsigned nv_cnt;
 
 #include "pins.h"
-#include "param.h"
 
-__attribute__((interrupt(51)))
-	void TimerB1_ISR(void){
-		PMMCTL0 = PMMPW | PMMSWPOR;
-		BITSET(TBCTL, TBCLR);
-	}
-__attribute__((section("__interrupt_vector_timer0_b1"),aligned(2)))
-void(*__vector_timer0_b1)(void) = TimerB1_ISR;
-
-// #define SHOW_PROGRESS_ON_LED
 #include <stdint.h>
 
 #define NUM_BUCKETS 128 // must be a power of 2
-//#define NUM_BUCKETS 512 // must be a power of 2
-//#define NUM_BUCKETS 64 // must be a power of 2
 #define MAX_RELOCATIONS 8
 
 #define NUM_KEYS (NUM_BUCKETS / 4) // shoot for 25% occupancy
@@ -76,14 +61,9 @@ static void init_hw()
 	msp_clock_setup();
 }
 
-void no_chkpt_start(){};
-void no_chkpt_end(){};
-//__attribute__((always_inline))
 void print_filter(fingerprint_t *filter)
 {
 	unsigned i;
-#if ENERGY == 0
-	no_chkpt_start();
 	BLOCK_PRINTF_BEGIN();
 	for (i = 0; i < NUM_BUCKETS; ++i) {
 		BLOCK_PRINTF("%04x ", filter[i]);
@@ -92,14 +72,10 @@ void print_filter(fingerprint_t *filter)
 		}
 	}
 	BLOCK_PRINTF_END();
-	no_chkpt_end();
-#endif
 }
-//__attribute__((always_inline))
 void log_filter(fingerprint_t *filter)
 {
 	unsigned i;
-	no_chkpt_start();
 	BLOCK_LOG_BEGIN();
 	BLOCK_LOG("address: %x\r\n", filter);
 	for (i = 0; i < NUM_BUCKETS; ++i) {
@@ -108,25 +84,14 @@ void log_filter(fingerprint_t *filter)
 			BLOCK_LOG("\r\n");
 	}
 	BLOCK_LOG_END();
-	no_chkpt_end();
 }
 
-// TODO: to avoid having to wrap every thing printf macro (to prevent
-// a mementos checkpoint in the middle of it, which could be in the
-// middle of an EDB energy guard), make printf functions in libio
-// and exclude libio from Mementos passes
-//__attribute__((always_inline))
 void print_stats(unsigned inserts, unsigned members, unsigned total)
 {
-#if ENERGY == 0
 	PRINTF("stats: inserts %u members %u total %u\r\n",
 			inserts, members, total);
-#endif
-//	while (__loop_bound__(999),members != 32) {
-//	}
 }
 
-//__attribute__((always_inline))
 static hash_t djb_hash(uint8_t* data, unsigned len)
 {
 	uint32_t hash = 5381;
@@ -139,27 +104,23 @@ static hash_t djb_hash(uint8_t* data, unsigned len)
 	return hash & 0xFFFF;
 }
 
-//__attribute__((always_inline))
 static index_t hash_fp_to_index(fingerprint_t fp)
 {
 	hash_t hash = djb_hash((uint8_t *)&fp, sizeof(fingerprint_t));
 	return hash & (NUM_BUCKETS - 1); // NUM_BUCKETS must be power of 2
 }
 
-//__attribute__((always_inline))
 static index_t hash_key_to_index(value_t fp)
 {
 	hash_t hash = djb_hash((uint8_t *)&fp, sizeof(value_t));
 	return hash & (NUM_BUCKETS - 1); // NUM_BUCKETS must be power of 2
 }
 
-//__attribute__((always_inline))
 static fingerprint_t hash_to_fingerprint(value_t key)
 {
 	return djb_hash((uint8_t *)&key, sizeof(value_t));
 }
 
-//__attribute__((always_inline))
 static value_t generate_key(value_t prev_key)
 {
 	// insert pseufo-random integers, for testing
@@ -169,7 +130,6 @@ static value_t generate_key(value_t prev_key)
 	return (prev_key + 1) * 17;
 }
 
-//__attribute__((always_inline))
 static bool insert(fingerprint_t *filter, value_t key)
 {
 	fingerprint_t fp1, fp2, fp_victim, fp_next_victim;
@@ -232,7 +192,6 @@ static bool insert(fingerprint_t *filter, value_t key)
 	return true;
 }
 
-//__attribute__((always_inline))
 static bool lookup(fingerprint_t *filter, value_t key)
 {
 	fingerprint_t fp = hash_to_fingerprint(key);
@@ -249,94 +208,54 @@ static bool lookup(fingerprint_t *filter, value_t key)
 
 	return filter[index1] == fp || filter[index2] == fp;
 }
-#if ENERGY == 0
-//__attribute__((interrupt(51)))
-//	void TimerB1_ISR(void){
-//		PMMCTL0 = PMMPW | PMMSWPOR;
-//		BITSET(TBCTL, TBCLR);
-//	}
-//__attribute__((section("__interrupt_vector_timer0_b1"),aligned(2)))
-//void(*__vector_timer0_b1)(void) = TimerB1_ISR;
-#endif
 
 void init()
 {
-#ifndef CONFIG_EDB
-	BITSET(TBCTL, (TBSSEL_1 | ID_3 | MC_2 | TBCLR));
-	BITSET(TBCCTL1 , CCIE);
-	TBCCR1 = 40;
-#endif
 	init_hw();
-#ifdef CONFIG_EDB
-	edb_init();
-#endif
 
 	INIT_CONSOLE();
 
 	__enable_interrupt();
 #ifdef LOGIC
 	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-
 	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_1);
 	GPIO(PORT_AUX3, OUT) &= ~BIT(PIN_AUX_3);
-	// Output enabled
-	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_1);
+
 	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_2);
+	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_1);
 	GPIO(PORT_AUX3, DIR) |= BIT(PIN_AUX_3);
-	//
-	// Out high
-	GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-	// Out low
-	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-	// Out high
-	//				GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-	// Out low
-	// tmp
+#ifdef OVERHEAD
+	// When timing overhead, pin 2 is on for
+	// region of interest
 #else
-#ifdef RATCHET
+	// elsewise, pin2 is toggled on boot
+	GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
+	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
+#endif
+#else
 	if (cur_reg == regs_0) {
 		PRINTF("%x\r\n", regs_1[0]);
 	}
 	else {
 		PRINTF("%x\r\n", regs_0[0]);
 	}
-#else
-	if (curctx->cur_reg == regs_0) {
-		PRINTF("%x\r\n", regs_1[0]);
-	}
-	else {
-		PRINTF("%x\r\n", regs_0[0]);
-	}
-#endif
 #endif
 }
-//__nv static fingerprint_t filter[NUM_BUCKETS];
+
 int main()
 {
-#ifdef RATCHET
+	// init() and restore_regs() should be called at the beginning of main.
+	// I could have made the compiler to do that, but was a bit lazy..
 	init();
 	restore_regs();
-	// Static makes it end up in .bss (initialized to zero on every boot)
-	// This is not what we want
-	// For Chinchilla, the compiler automatically moves it so no problem
+
 	fingerprint_t filter[NUM_BUCKETS];
-#else
-	fingerprint_t filter[NUM_BUCKETS];
-#endif
 
 	unsigned i;
 	value_t key;
-	// Mementos can't handle globals: it restores them to .data, when they are
-	// in .bss... So, for now, just keep all data on stack.
-
-	// Can't use C initializer because it gets converted into
-	// memset, but the memset linked in by GCC is of the wrong calling
-	// convention, but we can't override with our own memset because C runtime
-	// calls memset with GCC's calling convention. Catch 22.
 
 	//	unsigned count = 0;
 	while (1) {
-		nv_cnt = 0;
 #ifdef LOGIC
 		// Out high
 		GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_1);
@@ -345,12 +264,8 @@ int main()
 #endif
 
 		for (unsigned cnt = 0; cnt < 5; ++cnt) {
-			//for (unsigned cnt = 0; cnt < 40; ++cnt) {
 #if ENERGY == 0
 			PRINTF("start\r\n");
-#endif
-#ifndef CONFIG_EDB
-			//		PRINTF("REAL TIME start is 65536*%u+%u\r\n",overflow,(unsigned)TBR);
 #endif
 			for (i = 0; i < NUM_BUCKETS; ++i)
 				filter[i] = 0;
@@ -389,36 +304,17 @@ int main()
 			}
 			LOG("members/total: %u/%u\r\n", members, NUM_KEYS);
 
-#ifndef CONFIG_EDB
-			//		PRINTF("REAL TIME end is 65536*%u+%u\r\n",overflow,(unsigned)TBR);
-#endif
-#if ENERGY == 0
 			PRINTF("end\r\n");
-#endif
 			//PRINTF("chkpt cnt: %u\r\n", chkpt_count);
 			//PRINTF(".%u.\r\n", curctx->cur_reg[15]);
 			//print_filter(filter);
 			print_stats(inserts, members, NUM_KEYS);
-			//print_stack();
-			//		count++;
-			//		if(count == 5){
-			//			count = 0;
-			//			exit(0);
-			//		}
 		}
 #ifdef LOGIC
-		// Out high
-		//				GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-		// Out low
-		//				GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-		// tmp
-#ifndef RATCHET
-		unsigned tmp = curctx->cur_reg[15];
+		GPIO(PORT_AUX3, OUT) |= BIT(PIN_AUX_3);
+		GPIO(PORT_AUX3, OUT) &= ~BIT(PIN_AUX_3);
 #endif
-#endif
-		end_run();
-		PRINTF("nv_cnt: %u\r\n", nv_cnt);
-		}
-
-		return 0;
 	}
+
+	return 0;
+}

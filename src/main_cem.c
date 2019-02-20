@@ -1,4 +1,5 @@
 #include <msp430.h>
+#include <libwispbase/wisp-base.h>
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -29,9 +30,6 @@
 #define ENERGY_GUARD_END()
 #endif
 
-#ifdef ALPACA
-#include <libalpaca/alpaca.h>
-#endif
 #ifdef RATCHET
 #include <libratchet/ratchet.h>
 #endif
@@ -69,33 +67,23 @@ typedef struct _log_t {
 	unsigned count;
 	unsigned sample_count;
 } log_t;
-//__attribute__((always_inline))
+
 void print_log(log_t *log)
 {
 	unsigned i;
-#if ENERGY == 0
-	BLOCK_PRINTF_BEGIN();
-#ifndef CONFIG_EDB
-//	BLOCK_PRINTF("TIME end is 65536*%u+%u\r\n",overflow,(unsigned)TBR);
-#endif
-	BLOCK_PRINTF("rate: samples/block: %u/%u\r\n",
+	PRINTF("rate: samples/block: %u/%u\r\n",
 			log->sample_count, log->count);
-//	BLOCK_PRINTF("compressed block:\r\n");
-//	for (i = 0; __loop_bound__(64),i < log->count; ++i) {
-//
-//		BLOCK_PRINTF("%04x ", log->data[i]);
-//		if (i > 0 && ((i + 1) & (8 - 1)) == 0){
-//		}
-//		BLOCK_PRINTF("\r\n");
-//	}
-//	if ((log->count & (8 - 1)) != 0){
-//	}
-//	BLOCK_PRINTF("\r\n");
-	BLOCK_PRINTF_END();
-#endif
-	if (log->sample_count != 353) {
-		exit(0);
-	}
+	//	BLOCK_PRINTF("compressed block:\r\n");
+	//	for (i = 0; __loop_bound__(64),i < log->count; ++i) {
+	//
+	//		BLOCK_PRINTF("%04x ", log->data[i]);
+	//		if (i > 0 && ((i + 1) & (8 - 1)) == 0){
+	//		}
+	//		BLOCK_PRINTF("\r\n");
+	//	}
+	//	if ((log->count & (8 - 1)) != 0){
+	//	}
+	//	BLOCK_PRINTF("\r\n");
 }
 
 static void init_hw()
@@ -104,11 +92,6 @@ static void init_hw()
 	msp_gpio_unlock();
 	msp_clock_setup();
 }
-#if OVERHEAD > 0
-bool restored = 0;
-uint32_t counter = 0;
-#endif
-//__attribute__((always_inline))
 sample_t acquire_sample(letter_t prev_sample)
 {
 	//letter_t sample = rand() & 0x0F;
@@ -116,7 +99,6 @@ sample_t acquire_sample(letter_t prev_sample)
 	return sample;
 }
 
-//__attribute__((always_inline))
 void init_dict(dict_t *dict)
 {
 	letter_t l;
@@ -131,12 +113,9 @@ void init_dict(dict_t *dict)
 		node->child = 0;
 
 		dict->node_count++;
-//		PRINTF("init dict: node count %u %u\r\n", dict->node_count, l);
-//		PMMCTL0 = PMMPW | PMMSWPOR;
 	}
 }
 
-//__attribute__((always_inline))
 index_t find_child(letter_t letter, index_t parent, dict_t *dict)
 {
 	node_t *parent_node = &dict->nodes[parent];
@@ -168,7 +147,6 @@ index_t find_child(letter_t letter, index_t parent, dict_t *dict)
 	return NIL;
 }
 
-//__attribute__((always_inline))
 void add_node(letter_t letter, index_t parent, dict_t *dict)
 {
 	if (dict->node_count == DICT_SIZE) {
@@ -213,7 +191,6 @@ void add_node(letter_t letter, index_t parent, dict_t *dict)
 	}
 }
 
-//__attribute__((always_inline))
 void append_compressed(index_t parent, log_t *log)
 {
 	LOG("append comp: p %u cnt %u\r\n", parent, log->count);
@@ -236,46 +213,32 @@ void init()
 	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_1);
 	GPIO(PORT_AUX, DIR) |= BIT(PIN_AUX_2);
 	GPIO(PORT_AUX3, DIR) |= BIT(PIN_AUX_3);
-	//
-	// Out high
+#ifdef OVERHEAD
+	// When timing overhead, pin 2 is on for
+	// region of interest
+#else
+	// elsewise, pin2 is toggled on boot
 	GPIO(PORT_AUX, OUT) |= BIT(PIN_AUX_2);
-	// Out low
 	GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_2);
-#else
-#ifdef RATCHET
-	PRINTF("reboot\r\n");
-#else
-	PRINTF("%x\r\n", curctx->cur_reg[0]);
 #endif
+#else
+	if (cur_reg == regs_0) {
+		PRINTF("%x\r\n", regs_1[0]);
+	}
+	else {
+		PRINTF("%x\r\n", regs_0[0]);
+	}
 #endif
 }
 
 int main()
 {
-#ifdef RATCHET
-	// Temp: assume the bottom 48 bit of the stack
-	// is not used by the program (used by boot sequence)
-	// And assume init and restore_regs does not use
-	// more than 48 bit from the stack (This is a temp assumption)
-	// Boot sequence stack: 0x4400~0x4430
-	// 0x4430 = 17465
-	//	if (chkpt_ever_taken) {
-	//		__asm__ volatile ("mov.w #17465, R1"); // LR is going to be the next PC
-	//	}
+	// init() and restore_regs() should be called at the beginning of main.
+	// I could have made the compiler to do that, but was a bit lazy..
 	init();
 	restore_regs();
-#endif
-	// Mementos can't handle globals: it restores them to .data, when they are
-	// in .bss... So, for now, just keep all data on stack.
-	//static __nv dict_t dict;
-	//static __nv log_t log;
-#ifndef RATCHET
-	dict_t dict;
-	log_t log;
-#else
 	static __nv dict_t dict;
 	static __nv log_t log;
-#endif
 	// test
 	while (1) {
 #ifdef LOGIC
@@ -284,78 +247,66 @@ int main()
 		// Out low
 		GPIO(PORT_AUX, OUT) &= ~BIT(PIN_AUX_1);
 #endif
-		for (unsigned cnt = 0; cnt < 1; ++cnt) {
-		//for (unsigned cnt = 0; cnt < 20; ++cnt) {
-#if ENERGY == 0
-			//PRINTF("start: \r\n");
-#ifndef CONFIG_EDB
-			//		PRINTF("TIME start is 65536*%u+%u\r\n",overflow,(unsigned)TBR);
-#endif
-#endif
-			init_dict(&dict);
-			// Initialize the pointer into the dictionary to one of the root nodes
-			// Assume all streams start with a fixed prefix ('0'), to avoid having
-			// to letterize this out-of-band sample.
-			letter_t letter = 0;
+		init_dict(&dict);
+		// Initialize the pointer into the dictionary to one of the root nodes
+		// Assume all streams start with a fixed prefix ('0'), to avoid having
+		// to letterize this out-of-band sample.
+		letter_t letter = 0;
 
-			unsigned letter_idx = 0;
-			index_t parent, child;
-			sample_t sample, prev_sample = 0;
+		unsigned letter_idx = 0;
+		index_t parent, child;
+		sample_t sample, prev_sample = 0;
 
-			log.sample_count = 1; // count the initial sample (see above)
-			log.count = 0; // init compressed counter
+		log.sample_count = 1; // count the initial sample (see above)
+		log.count = 0; // init compressed counter
 
-			while (1) {
+		while (1) {
 
-				child = (index_t)letter; // relyes on initialization of dict
-				LOG("compress: parent %u\r\n", child); // naming is odd due to loop
+			child = (index_t)letter; // relyes on initialization of dict
+			LOG("compress: parent %u\r\n", child); // naming is odd due to loop
 
-				if (letter_idx == 0) {
-					sample = acquire_sample(prev_sample);
-					prev_sample = sample;
-				}
-				LOG("letter index: %u\r\n", letter_idx);
-				//PRINTF("letter index: %u\r\n", letter_idx);
-				letter_idx++;
-				if (letter_idx == NUM_LETTERS_IN_SAMPLE)
-					letter_idx = 0;
-				do {
-					//PRINTF("child before: %u\r\n", child);
-					unsigned letter_idx_tmp = (letter_idx == 0) ? NUM_LETTERS_IN_SAMPLE : letter_idx - 1; 
+			if (letter_idx == 0) {
+				sample = acquire_sample(prev_sample);
+				prev_sample = sample;
+			}
+			LOG("letter index: %u\r\n", letter_idx);
+			//PRINTF("letter index: %u\r\n", letter_idx);
+			letter_idx++;
+			if (letter_idx == NUM_LETTERS_IN_SAMPLE)
+				letter_idx = 0;
+			do {
+				//PRINTF("child before: %u\r\n", child);
+				unsigned letter_idx_tmp = (letter_idx == 0) ? NUM_LETTERS_IN_SAMPLE : letter_idx - 1; 
 
-					unsigned letter_shift = LETTER_SIZE_BITS * letter_idx_tmp;
-					letter = (sample & (LETTER_MASK << letter_shift)) >> letter_shift;
-					LOG("letterize: sample %x letter %x (%u)\r\n",
-							sample, letter, letter);
-					//PRINTF("letterize: sample %x letter %x (%u)\r\n",
-					//		sample, letter, letter);
+				unsigned letter_shift = LETTER_SIZE_BITS * letter_idx_tmp;
+				letter = (sample & (LETTER_MASK << letter_shift)) >> letter_shift;
+				LOG("letterize: sample %x letter %x (%u)\r\n",
+						sample, letter, letter);
+				//PRINTF("letterize: sample %x letter %x (%u)\r\n",
+				//		sample, letter, letter);
 
-					log.sample_count++;
-					parent = child;
-					child = find_child(letter, parent, &dict);
-					//PRINTF("child: %u\r\n", child);
-					LOG("child: %u\r\n", child);
-				} while (child != NIL);
+				log.sample_count++;
+				parent = child;
+				child = find_child(letter, parent, &dict);
+				//PRINTF("child: %u\r\n", child);
+				LOG("child: %u\r\n", child);
+			} while (child != NIL);
 
-				append_compressed(parent, &log);
-				add_node(letter, parent, &dict);
+			append_compressed(parent, &log);
+			add_node(letter, parent, &dict);
 
-				if (log.count == BLOCK_SIZE) {
-					//print_log(&log);
-					log.count = 0;
-					log.sample_count = 0;
+			if (log.count == BLOCK_SIZE) {
+				print_log(&log);
+				log.count = 0;
+				log.sample_count = 0;
 
-#if ENERGY == 0
-					//PRINTF("end\r\n");
-#endif
-					break;
-				}
+				break;
 			}
 		}
 #ifdef LOGIC
 		GPIO(PORT_AUX3, OUT) |= BIT(PIN_AUX_3);
 		GPIO(PORT_AUX3, OUT) &= ~BIT(PIN_AUX_3);
 #endif
-		}
-		return 0;
 	}
+	return 0;
+}

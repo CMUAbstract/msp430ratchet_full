@@ -30,16 +30,7 @@
 #define ENERGY_GUARD_END()
 #endif
 
-#ifdef ALPACA
-#include <libalpaca/alpaca.h>
-void no_chkpt_start(){};
-void no_chkpt_end(){};
-#endif
-#ifdef RATCHET
 #include <libratchet/ratchet.h>
-#define no_chkpt_start()
-#define no_chkpt_end()
-#endif
 #include "param.h"
 #include "pins.h"
 
@@ -86,7 +77,6 @@ void init()
 	}
 }
 
-
 #define N 500
 #define K 20
 // This is to avoid arrays ending up
@@ -94,16 +84,16 @@ void init()
 __nv unsigned vec[N];
 const unsigned kernel[K] =
 {1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1
 };
 __nv unsigned out[N-K+1];
 
 int main()
 {
-#ifdef RATCHET
+	// init() and restore_regs() should be called at the beginning of main.
+	// I could have made the compiler to do that, but was a bit lazy..
 	init();
 	restore_regs();
-#endif
 
 	while (1) {
 #ifdef LOGIC
@@ -130,13 +120,11 @@ int main()
 				out[i] += vec[i+j]*kernel[K-(j+1)];
 
 #ifdef CONFIG_EDB
-		no_chkpt_start();
 		BLOCK_PRINTF_BEGIN();
 		for (unsigned i = 0; i < 5; ++i)
 			BLOCK_PRINTF("%u ", out[i]);
 		BLOCK_PRINTF("\r\n");
 		BLOCK_PRINTF_END();
-		no_chkpt_end();
 #endif
 #ifdef LOGIC
 		// Out high
